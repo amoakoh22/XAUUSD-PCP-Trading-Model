@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # ═══════════════════════════════════════════════════════════════
-#   EasyCompressor v1.1 — Smart Video Compression for Termux
+#   EasyCompressor v1.1  -  Smart Video Compression for Termux
 #   Optimised for screen recordings | ffmpeg + termux-dialog
 # ═══════════════════════════════════════════════════════════════
 
@@ -112,7 +112,7 @@ check_dependencies() {
     fi
 
     if [[ ! -d "$HOME/storage" ]]; then
-        echo -e "${YELLOW}Requesting storage permission…${NC}"
+        echo -e "${YELLOW}Requesting storage permission...${NC}"
         termux-setup-storage && sleep 2
     fi
 }
@@ -122,15 +122,16 @@ check_dependencies() {
 # ═══════════════════════════════════════════════════════════════
 
 _dlg_text_val() {
-    # Extract "text" field from termux-dialog JSON (no jq needed)
-    grep -o '"text":"[^"]*"' | head -1 | sed 's/"text":"//;s/"$//'
+    # Extract "text" field  -  handle both "text":"val" and "text": "val"
+    grep -o '"text" *: *"[^"]*"' | head -1 | sed 's/.*"text" *: *"//;s/"$//'
 }
 
 _dlg_index_val() {
-    grep -o '"index":[0-9-]*' | head -1 | grep -o '[0-9-]*'
+    # Extract "index" field  -  handle both "index":N and "index": N
+    grep -o '"index" *: *-\?[0-9]*' | head -1 | grep -o '-\?[0-9]*$'
 }
 
-# Radio — returns selected text; empty string + rc=1 on cancel
+# Radio  -  returns selected text; empty string + rc=1 on cancel
 dlg_radio() {
     local title="$1" opts="$2"
     local raw; raw=$(termux-dialog radio -t "$title" -v "$opts" 2>/dev/null)
@@ -139,13 +140,13 @@ dlg_radio() {
     echo "$raw" | _dlg_text_val
 }
 
-# Confirm — rc=0 for yes, rc=1 for no/cancel
+# Confirm  -  rc=0 for yes, rc=1 for no/cancel
 dlg_confirm() {
     local raw; raw=$(termux-dialog confirm -t "$1" -i "$2" 2>/dev/null)
-    echo "$raw" | grep -q '"text":"yes"'
+    echo "$raw" | grep -q '"text" *: *"yes"'
 }
 
-# Text input — returns typed text; empty + rc=1 on cancel
+# Text input  -  returns typed text; empty + rc=1 on cancel
 dlg_text() {
     local raw; raw=$(termux-dialog text -t "$1" -i "$2" 2>/dev/null)
     local idx; idx=$(echo "$raw" | _dlg_index_val)
@@ -266,7 +267,7 @@ run_ffmpeg_progress() {
         fi
 
         local elapsed=$(( $(date +%s) - t_start ))
-        local eta_str="calculating…"
+        local eta_str="calculating..."
         if [[ $pct -gt 2 && $pct -lt 100 ]]; then
             local eta_sec=$(( elapsed * (100 - pct) / pct ))
             eta_str="ETA $(sec_to_hms "$eta_sec")"
@@ -318,7 +319,7 @@ select_from_dir() {
     }
 
     local opts; opts=$(printf "%s," "${labels[@]}"); opts="${opts%,}"
-    local chosen; chosen=$(dlg_radio "Browse — $(basename "$dir")" "$opts") || return 1
+    local chosen; chosen=$(dlg_radio "Browse  -  $(basename "$dir")" "$opts") || return 1
     [[ -z "$chosen" ]] && return 1
 
     for i in "${!labels[@]}"; do
@@ -366,7 +367,7 @@ pick_video_file() {
     [[ -s "$HISTORY_FILE" ]] && menu+=",Recent files  (last 5)"
     for l in "${loc_labels[@]}"; do menu+=",${l}"; done
 
-    local choice; choice=$(dlg_radio "Select Video — $APP_NAME" "$menu") || return 1
+    local choice; choice=$(dlg_radio "Select Video  -  $APP_NAME" "$menu") || return 1
     [[ -z "$choice" ]] && return 1
 
     case "$choice" in
@@ -402,11 +403,11 @@ pick_folder() {
 
 run_wizard() {
     # ── 1. Preset ────────────────────────────────────────────
-    local p; p=$(dlg_radio "Step 1/7 — Compression Preset" \
-"High Quality  (CRF 22 — best visuals),\
-Moderate  (CRF 28 — recommended),\
-High Compression  (CRF 34 — max size savings),\
-Social Media  (CRF 30 — under 50MB target),\
+    local p; p=$(dlg_radio "Step 1/7  -  Compression Preset" \
+"High Quality  (CRF 22  -  best visuals),\
+Moderate  (CRF 28  -  recommended),\
+High Compression  (CRF 34  -  max size savings),\
+Social Media  (CRF 30  -  under 50MB target),\
 Custom CRF  (manual control)") || return 1
     [[ -z "$p" ]] && return 1
 
@@ -421,16 +422,16 @@ Custom CRF  (manual control)") || return 1
     WIZARD_CRF=""
     if [[ "$WIZARD_PRESET" == "custom" ]]; then
         WIZARD_CRF=$(dlg_text "Custom CRF" \
-            "Range 18–51 | Lower = better quality | 28 is typical") || return 1
+            "Range 18-51 | Lower = better quality | 28 is typical") || return 1
         [[ -z "$WIZARD_CRF" ]] && WIZARD_CRF=28
     fi
 
     # ── 2. Resolution ────────────────────────────────────────
-    local r; r=$(dlg_radio "Step 2/7 — Output Resolution" \
+    local r; r=$(dlg_radio "Step 2/7  -  Output Resolution" \
 "Keep Original,\
-1080p  — Full HD,\
-720p  — Recommended for screen recordings,\
-480p  — Aggressive (smallest file)") || return 1
+1080p   -  Full HD,\
+720p   -  Recommended for screen recordings,\
+480p   -  Aggressive (smallest file)") || return 1
     [[ -z "$r" ]] && return 1
 
     case "$r" in
@@ -441,7 +442,7 @@ Custom CRF  (manual control)") || return 1
     esac
 
     # ── 3. Target file size ───────────────────────────────────
-    local sz; sz=$(dlg_radio "Step 3/7 — Target File Size" \
+    local sz; sz=$(dlg_radio "Step 3/7  -  Target File Size" \
 "No limit,\
 50 MB  (WhatsApp / Telegram),\
 100 MB,\
@@ -461,11 +462,11 @@ Custom size") || return 1
     esac
 
     # ── 4. Audio ─────────────────────────────────────────────
-    local au; au=$(dlg_radio "Step 4/7 — Audio" \
+    local au; au=$(dlg_radio "Step 4/7  -  Audio" \
 "Keep Original,\
 128k AAC  (recommended),\
 96k AAC  (smaller),\
-Mute  — remove all audio") || return 1
+Mute   -  remove all audio") || return 1
     [[ -z "$au" ]] && return 1
 
     case "$au" in
@@ -476,7 +477,7 @@ Mute  — remove all audio") || return 1
     esac
 
     # ── 5. Subtitles ─────────────────────────────────────────
-    local sub; sub=$(dlg_radio "Step 5/7 — Subtitles" \
+    local sub; sub=$(dlg_radio "Step 5/7  -  Subtitles" \
 "Remove subtitles,\
 Copy subtitles  (if present),\
 Burn into video  (hardcode)") || return 1
@@ -489,18 +490,18 @@ Burn into video  (hardcode)") || return 1
     esac
 
     # ── 6. Encoder speed ─────────────────────────────────────
-    local spd; spd=$(dlg_radio "Step 6/7 — Encoder Speed" \
-"ultrafast  — fastest / lower quality,\
+    local spd; spd=$(dlg_radio "Step 6/7  -  Encoder Speed" \
+"ultrafast   -  fastest / lower quality,\
 veryfast,\
 fast,\
-medium  — balanced,\
+medium   -  balanced,\
 slow,\
-veryslow  — best quality / very slow") || return 1
+veryslow   -  best quality / very slow") || return 1
     [[ -z "$spd" ]] && return 1
     WIZARD_SPEED=$(echo "$spd" | awk '{print $1}')
 
     # ── 7. Output options ─────────────────────────────────────
-    local nm; nm=$(dlg_radio "Step 7/7 — Output File" \
+    local nm; nm=$(dlg_radio "Step 7/7  -  Output File" \
 "Add '_compressed' suffix,\
 Custom suffix,\
 Same name  (overwrite original)") || return 1
@@ -544,7 +545,7 @@ show_confirmation() {
         )
         local ratio="${ratios[$WIZARD_PRESET]:-30}"
         local em; em=$(awk "BEGIN{printf \"%d\",$fsz*$ratio/100/1048576}")
-        est_label="~${em} MB  (estimate — actual varies)"
+        est_label="~${em} MB  (estimate  -  actual varies)"
     fi
 
     case "$WIZARD_PRESET" in
@@ -557,14 +558,14 @@ show_confirmation() {
 
     local encoder; encoder=$(choose_encoder)
 
-    dlg_confirm "✓ Ready to Compress?" \
-"─── INPUT ────────────────────────
+    dlg_confirm "Ready to Compress?" \
+"--- INPUT ---
   File:       $(basename "$input")
   Size:       $(bytes_to_human "$fsz")
   Duration:   ${dur_m}m ${dur_s}s
   Resolution: $res
 
-─── SETTINGS ─────────────────────
+--- SETTINGS ---
   Preset:     $preset_label
   Resolution: $WIZARD_RESOLUTION
   Target:     ${WIZARD_TARGET_MB:-0} MB limit
@@ -573,7 +574,7 @@ show_confirmation() {
   Speed:      $WIZARD_SPEED
   Encoder:    $encoder
 
-─── OUTPUT ────────────────────────
+--- OUTPUT ---
   File:       $(basename "$output")
   Est. size:  $est_label
   Delete src: $WIZARD_DELETE_ORIGINAL
@@ -623,15 +624,15 @@ compress_video() {
     local eff_dur="${time_limit:-$duration}"
 
     echo ""
-    echo -e "  ${BOLD}${CYAN}▶ Compressing…${NC}"
+    echo -e "  ${BOLD}${CYAN}>> Compressing...${NC}"
     echo -e "  Encoder : ${YELLOW}${encoder}${NC}"
     echo -e "  Input   : $(basename "$input")  ($(bytes_to_human "$in_size"))"
     echo -e "  Output  : $(basename "$output")"
-    [[ -n "$time_limit" ]] && echo -e "  ${YELLOW}⚡ Quick Test mode — first ${time_limit}s only${NC}"
+    [[ -n "$time_limit" ]] && echo -e "  ${YELLOW}Quick Test mode  -  first ${time_limit}s only${NC}"
     echo ""
 
     mkdir -p "$(dirname "$output")"
-    notify "⏳ Compressing $(basename "$input")…"
+    notify "Compressing $(basename "$input")..."
 
     local t_start; t_start=$(date +%s)
     local rc=0
@@ -671,7 +672,7 @@ compress_video() {
 
         local vbr; vbr=$(calc_bitrate_for_target "$WIZARD_TARGET_MB" "$eff_dur" "$audio_kbps")
 
-        echo -e "  ${BLUE}[Pass 1/2]${NC} Analysis…"
+        echo -e "  ${BLUE}[Pass 1/2]${NC} Analysis..."
 
         if [[ "$encoder" == "libx265" ]]; then
             run_ffmpeg_progress "$eff_dur" \
@@ -687,7 +688,7 @@ compress_video() {
                 -an -f null /dev/null
         fi
 
-        echo -e "  ${BLUE}[Pass 2/2]${NC} Encoding…"
+        echo -e "  ${BLUE}[Pass 2/2]${NC} Encoding..."
 
         if [[ "$encoder" == "libx265" ]]; then
             run_ffmpeg_progress "$eff_dur" \
@@ -733,7 +734,7 @@ compress_video() {
         local pct; pct=$(awk "BEGIN{printf \"%d\",$saved*100/$in_size}")
 
         echo -e ""
-        echo -e "  ${GREEN}${BOLD}✓ Done!${NC}  ${e_min}m ${e_sec}s"
+        echo -e "  ${GREEN}${BOLD}DONE!${NC}  ${e_min}m ${e_sec}s"
         echo -e "  ┌──────────────────────────────────"
         echo -e "  │  Before : $(bytes_to_human "$in_size")"
         echo -e "  │  After  : $(bytes_to_human "$out_size")"
@@ -741,11 +742,11 @@ compress_video() {
         echo -e "  └──────────────────────────────────"
         echo ""
 
-        notify "✓ Done! $(basename "$input") — saved ${pct}%  ($(bytes_to_human "$out_size"))"
+        notify "Done! $(basename "$input") - saved ${pct}% ($(bytes_to_human "$out_size"))"
 
         write_log "OK" "$input" "$output" "$in_size" "$out_size" "$elapsed"
 
-        dlg_info "✓ Compression Complete!" \
+        dlg_info "Compression Complete!" \
 "Time:      ${e_min}m ${e_sec}s
 Before:    $(bytes_to_human "$in_size")
 After:     $(bytes_to_human "$out_size")
@@ -763,11 +764,11 @@ $(basename "$output")"
 
         return 0
     else
-        echo -e "  ${RED}${BOLD}✗ Compression failed  (exit ${rc})${NC}"
-        notify "✗ Failed: $(basename "$input")"
+        echo -e "  ${RED}${BOLD}FAILED (exit ${rc})${NC}"
+        notify "Failed: $(basename "$input")"
         write_log "FAIL" "$input" "$output" "$in_size" "0" "$elapsed"
         rm -f "$output"
-        dlg_info "✗ Failed" \
+        dlg_info "Failed" \
 "Compression failed (exit code $rc).
 
 Common causes:
@@ -808,17 +809,17 @@ mode_info() {
     local enc; enc=$(has_encoder "libx265" && echo "libx265" || echo "libx264")
 
     dlg_info "Video Info" \
-"─── FILE ─────────────────────────
+"--- FILE ---
   Name:       $(basename "$input")
   Size:       $(bytes_to_human "$sz")
   Path:       $input
 
-─── STREAMS ──────────────────────
+--- STREAMS ---
   Resolution: $res
   Duration:   ${dm}m ${ds}s
   Bitrate:    ${br} kbps
 
-─── SYSTEM ───────────────────────
+--- SYSTEM ---
   Encoder:    $(choose_encoder)
   Config:     $CONFIG_DIR"
 }
@@ -848,7 +849,7 @@ mode_quick_test() {
     local base; base=$(basename "$input")
     local output="${dir}/${base%.*}_test45s.${base##*.}"
 
-    dlg_confirm "⚡ Quick Test" \
+    dlg_confirm "Quick Test" \
 "Compress FIRST 45 SECONDS only.
 
 Purpose: test your settings before
@@ -886,7 +887,7 @@ mode_batch() {
 
     run_wizard || return
 
-    dlg_confirm "Batch Compress — $count videos" \
+    dlg_confirm "Batch Compress  -  $count videos" \
 "Videos found:\n${list}
 Settings will apply to all.
 Skip already-compressed files: YES
@@ -902,7 +903,7 @@ Start batch?" || return
 
         # Skip if output already exists
         if [[ -f "$out" ]]; then
-            echo -e "  ${DIM}⊘ Skip (exists): $(basename "$out")${NC}"
+            echo -e "  ${DIM}[skip] already exists: $(basename "$out")${NC}"
             (( skip++ ))
             continue
         fi
@@ -938,7 +939,7 @@ mode_history() {
 }
 
 mode_settings() {
-    local choice; choice=$(dlg_radio "⚙ Settings" \
+    local choice; choice=$(dlg_radio "Settings" \
 "View current config,\
 Save current as defaults,\
 Reset to factory defaults,\
@@ -1005,7 +1006,7 @@ Staying on software encoder."
 
         "About $APP_NAME")
             dlg_info "About $APP_NAME v$VERSION" \
-"$APP_NAME — Smart Video Compression
+"$APP_NAME  -  Smart Video Compression
 Version $VERSION
 
 Built for Termux on Android.
@@ -1036,25 +1037,20 @@ Config dir:
 
 main_menu() {
     while true; do
-        local choice; choice=$(dlg_radio "$APP_NAME  v$VERSION" \
-"Single Video,\
-Batch Folder,\
-Quick Test  (45s preview),\
-Video Info,\
-⚙ Settings,\
-Exit") || {
+        local choice; choice=$(dlg_radio "$APP_NAME v$VERSION" \
+"Single Video,Batch Folder,Quick Test (45s preview),Video Info,Settings,Exit") || {
             dlg_confirm "Exit" "Exit $APP_NAME?" && break
             continue
         }
         [[ -z "$choice" ]] && { dlg_confirm "Exit" "Exit $APP_NAME?" && break; continue; }
 
         case "$choice" in
-            "Single Video")   mode_single ;;
-            "Batch Folder")   mode_batch ;;
-            "Quick Test"*)    mode_quick_test ;;
-            "Video Info")     mode_info ;;
-            "⚙ Settings")    mode_settings ;;
-            "Exit")           break ;;
+            "Single Video")      mode_single ;;
+            "Batch Folder")      mode_batch ;;
+            "Quick Test"*)       mode_quick_test ;;
+            "Video Info")        mode_info ;;
+            "Settings")          mode_settings ;;
+            "Exit")              break ;;
         esac
     done
 }
