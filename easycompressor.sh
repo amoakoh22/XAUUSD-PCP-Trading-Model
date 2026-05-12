@@ -97,16 +97,17 @@ write_log() {
 
 check_dependencies() {
     local missing=()
-    command -v ffmpeg       >/dev/null 2>&1 || missing+=("ffmpeg")
-    command -v ffprobe      >/dev/null 2>&1 || missing+=("ffprobe  (part of ffmpeg)")
-    command -v termux-dialog>/dev/null 2>&1 || missing+=("termux-api  →  pkg install termux-api")
+    command -v ffmpeg        >/dev/null 2>&1 || missing+=("ffmpeg")
+    command -v ffprobe       >/dev/null 2>&1 || missing+=("ffprobe  (part of ffmpeg)")
+    command -v termux-dialog >/dev/null 2>&1 || missing+=("termux-api  →  pkg install termux-api")
+    command -v python3       >/dev/null 2>&1 || missing+=("python  →  pkg install python")
 
     if [[ ${#missing[@]} -gt 0 ]]; then
         echo -e "${RED}Missing required tools:${NC}"
         for m in "${missing[@]}"; do echo "  • $m"; done
         echo ""
         echo "Quick install:"
-        echo "  pkg install ffmpeg termux-api"
+        echo "  pkg install ffmpeg termux-api python"
         echo "  Also install 'Termux:API' from F-Droid / Play Store"
         exit 1
     fi
@@ -121,37 +122,41 @@ check_dependencies() {
 # DIALOG HELPERS
 # ═══════════════════════════════════════════════════════════════
 
-_dlg_text_val() {
-    # Extract "text" field  -  handle both "text":"val" and "text": "val"
-    grep -o '"text" *: *"[^"]*"' | head -1 | sed 's/.*"text" *: *"//;s/"$//'
+# Parse a field from termux-dialog JSON using Python3 (no grep quirks)
+_json_field() {
+    local field="$1" json="$2"
+    python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.argv[2])
+    v = d.get(sys.argv[1])
+    print('' if v is None else str(v))
+except Exception:
+    print('')
+" "$field" "$json" 2>/dev/null
 }
 
-_dlg_index_val() {
-    # Extract "index" field  -  handle both "index":N and "index": N
-    grep -o '"index" *: *-\?[0-9]*' | head -1 | grep -o '-\?[0-9]*$'
-}
-
-# Radio  -  returns selected text; empty string + rc=1 on cancel
+# Radio  -  returns selected text, or empty string + rc=1 on cancel/back
 dlg_radio() {
     local title="$1" opts="$2"
     local raw; raw=$(termux-dialog radio -t "$title" -v "$opts" 2>/dev/null)
-    local idx; idx=$(echo "$raw" | _dlg_index_val)
+    local idx; idx=$(_json_field "index" "$raw")
     [[ -z "$idx" || "$idx" == "-1" ]] && { echo ""; return 1; }
-    echo "$raw" | _dlg_text_val
+    _json_field "text" "$raw"
 }
 
 # Confirm  -  rc=0 for yes, rc=1 for no/cancel
 dlg_confirm() {
     local raw; raw=$(termux-dialog confirm -t "$1" -i "$2" 2>/dev/null)
-    echo "$raw" | grep -q '"text" *: *"yes"'
+    [[ "$(_json_field "text" "$raw")" == "yes" ]]
 }
 
-# Text input  -  returns typed text; empty + rc=1 on cancel
+# Text input  -  returns typed text, or empty + rc=1 on cancel
 dlg_text() {
     local raw; raw=$(termux-dialog text -t "$1" -i "$2" 2>/dev/null)
-    local idx; idx=$(echo "$raw" | _dlg_index_val)
+    local idx; idx=$(_json_field "index" "$raw")
     [[ -z "$idx" || "$idx" == "-1" ]] && { echo ""; return 1; }
-    echo "$raw" | _dlg_text_val
+    _json_field "text" "$raw"
 }
 
 # Info popup (OK only)
@@ -290,108 +295,103 @@ run_ffmpeg_progress() {
 # FILE SELECTION
 # ═══════════════════════════════════════════════════════════════
 
-_label_with_size() {
-    local f="$1"
-    local sz; sz=$(file_size_bytes "$f")
-    local h; h=$(bytes_to_human "$sz")
-    echo "$(basename "$f")  [${h}]"
-}
+# All common Android video locations to scan
+_VIDEO_DIRS=(
+    "/sdcard/DCIM/Screen recordings"
+    "/sdcard/DCIM/Recordings"
+    "/sdcard/DCIM"
+    "/sdcard/Movies"
+    "/sdcard/Download"
+    "/sdcard/Downloads"
+    "/sdcard/Recordings"
+    "/sdcard/WhatsApp/Media/WhatsApp Video"
+    "$HOME/storage/dcim"
+    "$HOME/storage/movies"
+    "$HOME/storage/downloads"
+)
 
-_find_videos() {
-    local dir="$1" depth="${2:-2}"
-    find "$dir" -maxdepth "$depth" -type f \
-        \( -iname "*.mp4" -o -iname "*.mov" -o -iname "*.mkv" -o -iname "*.avi" -o -iname "*.webm" \) \
-        2>/dev/null | sort
-}
-
-select_from_dir() {
-    local dir="$1"
-    local -a labels paths
-
-    while IFS= read -r f; do
-        labels+=("$(_label_with_size "$f")")
-        paths+=("$f")
-    done < <(_find_videos "$dir")
-
-    [[ ${#labels[@]} -eq 0 ]] && {
-        dlg_info "No Videos" "No video files found in:\n$(basename "$dir")"
-        return 1
-    }
-
-    local opts; opts=$(printf "%s," "${labels[@]}"); opts="${opts%,}"
-    local chosen; chosen=$(dlg_radio "Browse  -  $(basename "$dir")" "$opts") || return 1
-    [[ -z "$chosen" ]] && return 1
-
-    for i in "${!labels[@]}"; do
-        [[ "${labels[$i]}" == "$chosen" ]] && { echo "${paths[$i]}"; return 0; }
+# Scan all known locations and return video files (path:label pairs)
+_scan_all_videos() {
+    local -a seen=()
+    for d in "${_VIDEO_DIRS[@]}"; do
+        [[ ! -d "$d" ]] && continue
+        while IFS= read -r f; do
+            # Skip duplicates (same real path)
+            local real; real=$(readlink -f "$f" 2>/dev/null || echo "$f")
+            local already=0
+            for s in "${seen[@]}"; do [[ "$s" == "$real" ]] && already=1 && break; done
+            [[ $already -eq 1 ]] && continue
+            seen+=("$real")
+            local sz; sz=$(file_size_bytes "$f")
+            local h; h=$(bytes_to_human "$sz")
+            echo "${f}|$(basename "$f") [${h}]"
+        done < <(find "$d" -maxdepth 1 -type f \
+            \( -iname "*.mp4" -o -iname "*.mov" -o -iname "*.mkv" \
+               -o -iname "*.avi" -o -iname "*.webm" \) 2>/dev/null | sort)
     done
-    return 1
 }
 
-select_from_history() {
-    [[ ! -s "$HISTORY_FILE" ]] && { dlg_info "No History" "No recent files recorded."; return 1; }
-
-    local -a labels paths
-    while IFS= read -r p; do
-        [[ -f "$p" ]] && { labels+=("$(_label_with_size "$p")"); paths+=("$p"); }
-    done < "$HISTORY_FILE"
-
-    [[ ${#labels[@]} -eq 0 ]] && { dlg_info "No History" "Recent files no longer exist."; return 1; }
-
-    local opts; opts=$(printf "%s," "${labels[@]}"); opts="${opts%,}"
-    local chosen; chosen=$(dlg_radio "Recent Files" "$opts") || return 1
-    [[ -z "$chosen" ]] && return 1
-
-    for i in "${!labels[@]}"; do
-        [[ "${labels[$i]}" == "$chosen" ]] && { echo "${paths[$i]}"; return 0; }
-    done
-    return 1
-}
-
+# Main file picker: shows ONE flat list of all found videos
 pick_video_file() {
-    local -a loc_labels loc_paths
+    echo -e "  ${CYAN}Scanning storage for videos...${NC}" >&2
 
-    for d in \
-        "/sdcard/DCIM/Screen recordings" \
-        "/sdcard/DCIM" "/sdcard/Movies" \
-        "/sdcard/Download" "/sdcard/Downloads" \
-        "/sdcard/Recordings" \
-        "$HOME/storage/dcim" \
-        "$HOME/storage/movies" \
-        "$HOME/storage/downloads"
-    do
-        [[ -d "$d" ]] && { loc_labels+=("Browse: $(basename "$d")"); loc_paths+=("$d"); }
+    local -a labels paths
+    local line
+
+    # Add recent files at the top
+    if [[ -s "$HISTORY_FILE" ]]; then
+        while IFS= read -r p; do
+            [[ -f "$p" ]] || continue
+            local sz; sz=$(file_size_bytes "$p")
+            labels+=("[Recent] $(basename "$p") [$(bytes_to_human "$sz")]")
+            paths+=("$p")
+        done < "$HISTORY_FILE"
+    fi
+
+    # Add discovered videos
+    while IFS='|' read -r fpath flabel; do
+        [[ -z "$fpath" ]] && continue
+        # Skip if already in recent list
+        local dup=0
+        for p in "${paths[@]}"; do [[ "$p" == "$fpath" ]] && dup=1 && break; done
+        [[ $dup -eq 1 ]] && continue
+        labels+=("$flabel")
+        paths+=("$fpath")
+    done < <(_scan_all_videos)
+
+    # Build options
+    local -a opts_arr=("Enter path manually")
+    local -a opts_paths=("")
+    for i in "${!labels[@]}"; do
+        opts_arr+=("${labels[$i]}")
+        opts_paths+=("${paths[$i]}")
     done
 
-    local menu="Enter path manually"
-    [[ -s "$HISTORY_FILE" ]] && menu+=",Recent files  (last 5)"
-    for l in "${loc_labels[@]}"; do menu+=",${l}"; done
+    local found_count=$(( ${#opts_arr[@]} - 1 ))
+    local opts; opts=$(printf "%s," "${opts_arr[@]}"); opts="${opts%,}"
 
-    local choice; choice=$(dlg_radio "Select Video  -  $APP_NAME" "$menu") || return 1
-    [[ -z "$choice" ]] && return 1
+    local chosen; chosen=$(dlg_radio "Select Video ($found_count found)" "$opts") || return 1
+    [[ -z "$chosen" ]] && return 1
 
-    case "$choice" in
-        "Enter path manually")
-            local p; p=$(dlg_text "Full Video Path" "/sdcard/Movies/video.mp4") || return 1
-            echo "$p"
-            ;;
-        "Recent files"*)
-            select_from_history
-            ;;
-        "Browse: "*)
-            local lbl="${choice#Browse: }"
-            for i in "${!loc_labels[@]}"; do
-                [[ "${loc_labels[$i]}" == "Browse: $lbl" ]] && {
-                    select_from_dir "${loc_paths[$i]}"
-                    return $?
-                }
-            done
-            ;;
-    esac
+    if [[ "$chosen" == "Enter path manually" ]]; then
+        local p; p=$(dlg_text "Full Video Path" "/sdcard/Movies/video.mp4") || return 1
+        [[ -z "$p" ]] && return 1
+        echo "$p"
+        return 0
+    fi
+
+    for i in "${!opts_arr[@]}"; do
+        [[ "${opts_arr[$i]}" == "$chosen" ]] && {
+            echo "${opts_paths[$i]}"
+            return 0
+        }
+    done
+    return 1
 }
 
 pick_folder() {
     local p; p=$(dlg_text "Folder Path" "/sdcard/Movies") || return 1
+    [[ -z "$p" ]] && return 1
     [[ -d "$p" ]] || { dlg_info "Not Found" "Folder does not exist:\n$p"; return 1; }
     echo "$p"
 }
