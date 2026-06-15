@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: Arial, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #222; line-height: 1.6; }
+  h1 { color: #1a1a1a; border-bottom: 2px solid #333; padding-bottom: 8px; }
+  h2 { color: #333; border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-top: 2em; }
+  pre { background: #f4f4f4; border: 1px solid #ddd; border-radius: 4px; padding: 12px; overflow-x: auto; font-size: 0.85em; }
+  code { background: #f4f4f4; padding: 2px 5px; border-radius: 3px; font-size: 0.9em; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
+  th { background: #f0f0f0; font-weight: bold; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 2em 0; }
+  li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<h1>Claude Code on Android via Termux — Runbook</h1>
+<p>Tested on: Android (ARM64), Termux from F-Droid, Claude Code v2.1.177</p>
+<hr />
+<h2>Why This Is Non-Trivial</h2>
+<p>Claude Code ships native binaries for <code>linux-arm64</code> and <code>linux-arm64-musl</code>, but
+Android is detected as <code>linux-arm64-android</code> — a platform not supported by the
+installer. The native binaries are also compiled as non-PIE (<code>ET_EXEC</code>) which
+Android's dynamic linker rejects. The workaround is to run Claude Code inside a
+real Linux environment (Ubuntu) via <code>proot-distro</code>.</p>
+<hr />
+<h2>Prerequisites</h2>
+<ul>
+<li>Android phone (ARM64 / 64-bit)</li>
+<li><strong>Termux installed from F-Droid</strong> — NOT the Google Play Store version (abandoned)</li>
+<li>https://f-droid.org/app/com.termux</li>
+<li>A Claude account (Pro, Max, Team, or Enterprise) or Anthropic API key</li>
+</ul>
+<hr />
+<h2>Step 1 — Update Termux</h2>
+<pre><code class="language-bash">pkg update &amp;&amp; pkg upgrade
+</code></pre>
+<hr />
+<h2>Step 2 — Install proot-distro and Ubuntu</h2>
+<pre><code class="language-bash">pkg install proot-distro
+proot-distro install ubuntu
+</code></pre>
+<p>The Ubuntu download takes a few minutes.</p>
+<hr />
+<h2>Step 3 — Log into Ubuntu</h2>
+<pre><code class="language-bash">proot-distro login ubuntu
+</code></pre>
+<p>Your prompt changes to <code>root@localhost:~#</code>. All remaining steps run inside here.</p>
+<hr />
+<h2>Step 4 — Install NVM and Node.js 20</h2>
+<p>Do <strong>not</strong> use Ubuntu's system Node.js (<code>apt install nodejs</code>) — it installs old
+package versions that conflict with Claude Code's dependencies.</p>
+<pre><code class="language-bash">apt install -y curl
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+export NVM_DIR=&quot;$HOME/.nvm&quot;
+[ -s &quot;$NVM_DIR/nvm.sh&quot; ] &amp;&amp; \. &quot;$NVM_DIR/nvm.sh&quot;
+nvm install 20
+</code></pre>
+<p>NVM automatically adds itself to <code>~/.bashrc</code>, so it persists across sessions.</p>
+<hr />
+<h2>Step 5 — Install Claude Code</h2>
+<pre><code class="language-bash">npm install -g @anthropic-ai/claude-code
+</code></pre>
+<p>You should see <code>Checksums matched!</code> confirming the native binary downloaded.</p>
+<p>Verify:</p>
+<pre><code class="language-bash">claude --version
+# Expected: 2.1.177 (Claude Code)
+</code></pre>
+<hr />
+<h2>Step 6 — Authenticate</h2>
+<pre><code class="language-bash">claude
+</code></pre>
+<p>When the login URL appears:
+- Press <code>c</code> to copy it (or read it from the screen)
+- Open it in your Android browser
+- Log in with your Claude account
+- Return to Termux — you are now authenticated</p>
+<hr />
+<h2>Step 7 — Fix PATH and Clean Up (one-time)</h2>
+<p>Run the built-in diagnostics:</p>
+<pre><code>/doctor
+</code></pre>
+<p>Press <code>f</code> to let Claude auto-fix the two issues it finds:</p>
+<ol>
+<li><strong><code>~/.local/bin</code> not in PATH</strong> — adds <code>export PATH="$HOME/.local/bin:$PATH"</code> to <code>~/.bashrc</code></li>
+<li><strong>Leftover npm installation</strong> — runs <code>npm -g uninstall @anthropic-ai/claude-code</code> to remove the duplicate</li>
+</ol>
+<p>After fixes are applied, exit and re-login to pick up the PATH change:</p>
+<pre><code class="language-bash">exit                        # leave Ubuntu
+proot-distro login ubuntu   # re-enter
+which claude                # should show /root/.local/bin/claude
+</code></pre>
+<hr />
+<h2>Daily Workflow</h2>
+<p>Every time you want to use Claude Code on your Android:</p>
+<pre><code class="language-bash"># In Termux:
+proot-distro login ubuntu
+
+# Inside Ubuntu:
+claude
+</code></pre>
+<hr />
+<h2>Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Error</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>linux-arm64-android are not available</code></td>
+<td>Android detected instead of Linux</td>
+<td>Use proot-distro Ubuntu (this runbook)</td>
+</tr>
+<tr>
+<td><code>has unexpected e_type: 2</code></td>
+<td>Non-PIE binary rejected by Android</td>
+<td>Use proot-distro Ubuntu (this runbook)</td>
+</tr>
+<tr>
+<td><code>Cannot find module '.../glob/dist/cjs/src/index.js'</code></td>
+<td>Ubuntu system Node.js too old</td>
+<td>Use NVM (Step 4) instead of <code>apt install nodejs</code></td>
+</tr>
+<tr>
+<td><code>claude: command not found</code> after re-login</td>
+<td>NVM not sourced</td>
+<td>Run: <code>source ~/.bashrc</code></td>
+</tr>
+<tr>
+<td><code>which claude</code> shows Termux path</td>
+<td>Old PATH in current session</td>
+<td>Exit and re-login to Ubuntu</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>What Does NOT Work (and Why)</h2>
+<ul>
+<li><strong>Direct Termux install</strong> (<code>npm install -g @anthropic-ai/claude-code</code>): installer detects <code>linux-arm64-android</code>, refuses to download binary</li>
+<li><strong>Force-installing the ARM64 musl binary</strong>: binary is non-PIE (<code>ET_EXEC</code>), Android dynamic linker rejects it with <code>unexpected e_type: 2</code></li>
+<li><strong>Setting <code>ANTHROPIC_CLAUDE_CODE_PLATFORM</code> env var</strong>: the install script ignores it</li>
+<li><strong>Ubuntu system Node.js</strong> (<code>apt install nodejs</code>): installs glob v7 which lacks <code>dist/cjs/src/</code> structure required by Claude Code</li>
+</ul>
+</body>
+</html>
